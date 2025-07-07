@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
+    Application,
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
@@ -10,13 +10,13 @@ from telegram.ext import (
     filters
 )
 
-# تنظیمات اولیه
+# تنظیمات ادمین‌ها
 ADMINS = {
     262011432: "ادمین اصلی",  # ایدی شما
-    # می‌توانید ادمین‌های دیگر را اینجا اضافه کنید
+    # اضافه کردن ادمین‌های دیگر: {ایدی عددی: "نام ادمین"}
 }
 
-# دیتابیس ساده در حافظه (در پروژه واقعی از پایگاه داده استفاده کنید)
+# دیتابیس ساده (در پروژه واقعی از پایگاه داده استفاده کنید)
 DB = {
     "matches": {},
     "teams": {},
@@ -25,19 +25,19 @@ DB = {
     "next_match_id": 1
 }
 
-# ---- بخش دستورات ادمین ----
+# --- دستورات ادمین ---
 
 async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """اضافه کردن ادمین جدید"""
-    if update.effective_user.id != 262011432:  # فقط ادمین اصلی می‌تواند ادمین اضافه کند
-        await update.message.reply_text("❌ فقط ادمین اصلی می‌تواند ادمین جدید اضافه کند")
+    if update.effective_user.id != 262011432:
+        await update.message.reply_text("❌ فقط ادمین اصلی می‌تواند ادمین اضافه کند")
         return
     
     try:
         new_admin_id = int(context.args[0])
         new_admin_name = " ".join(context.args[1:]) if len(context.args) > 1 else "ادمین جدید"
         ADMINS[new_admin_id] = new_admin_name
-        await update.message.reply_text(f"✅ ادمین جدید با موفقیت اضافه شد:\n{new_admin_id} - {new_admin_name}")
+        await update.message.reply_text(f"✅ ادمین جدید اضافه شد:\n{new_admin_id} - {new_admin_name}")
     except (IndexError, ValueError):
         await update.message.reply_text("فرمت صحیح:\n/addadmin ایدی_عددی نام_ادمین")
 
@@ -52,12 +52,8 @@ async def add_team(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     team_name = " ".join(context.args)
-    if team_name in DB["teams"]:
-        await update.message.reply_text("⚠️ این تیم قبلاً ثبت شده است")
-        return
-    
     DB["teams"][team_name] = {"players": []}
-    await update.message.reply_text(f"✅ تیم '{team_name}' با موفقیت اضافه شد")
+    await update.message.reply_text(f"✅ تیم '{team_name}' اضافه شد")
 
 async def add_player(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """اضافه کردن بازیکن به تیم"""
@@ -94,16 +90,13 @@ async def schedule_match(update: Update, context: ContextTypes.DEFAULT_TYPE):
     match_date = context.args[2]
     match_time = context.args[3]
     
-    # بررسی وجود تیم‌ها
     if home_team not in DB["teams"] or away_team not in DB["teams"]:
         await update.message.reply_text("⚠️ یکی از تیم‌ها ثبت نشده است")
         return
     
-    # ایجاد شناسه مسابقه
     match_id = DB["next_match_id"]
     DB["next_match_id"] += 1
     
-    # ذخیره اطلاعات مسابقه
     DB["matches"][match_id] = {
         "home": home_team,
         "away": away_team,
@@ -160,7 +153,7 @@ async def set_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("⚠️ آیدی مسابقه باید عددی باشد")
 
-# ---- بخش دستورات کاربران ----
+# --- دستورات کاربران ---
 
 async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """نمایش مسابقات فعال برای پیش‌بینی"""
@@ -168,9 +161,9 @@ async def show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now()
     
     for match_id, match in DB["matches"].items():
-        if match["result"] is None:  # فقط مسابقاتی که نتیجه ندارند
+        if match["result"] is None:
             match_time = datetime.strptime(f"{match['date']} {match['time']}", "%Y-%m-%d %H:%M")
-            if now < match_time:  # مسابقاتی که هنوز برگزار نشده‌اند
+            if now < match_time:
                 active_matches.append(
                     f"🆔 {match_id}: {match['home']} vs {match['away']}\n"
                     f"📅 {match['date']} ⏰ {match['time']}\n"
@@ -209,7 +202,6 @@ async def predict_match(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⏰ زمان پیش‌بینی برای این مسابقه به پایان رسیده است")
             return
         
-        # ایجاد دکمه‌های پیش‌بینی
         keyboard = [
             [
                 InlineKeyboardButton(f"{match['home']} برد", callback_data=f"pred:{match_id}:home"),
@@ -238,13 +230,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     match_id = int(match_id)
     user_id = query.from_user.id
     
-    # ذخیره پیش‌بینی کاربر
     if match_id not in DB["predictions"]:
         DB["predictions"][match_id] = {}
     
     DB["predictions"][match_id][user_id] = prediction
     
-    # نمایش نتیجه به کاربر
     match = DB["matches"][match_id]
     team_names = {
         "home": match["home"],
@@ -266,7 +256,6 @@ async def show_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🏆 هنوز هیچ امتیازی ثبت نشده است")
         return
     
-    # مرتب‌سازی کاربران بر اساس امتیاز
     sorted_scores = sorted(DB["scores"].items(), key=lambda item: item[1], reverse=True)
     
     leaderboard = ["🏆 جدول امتیازات:\n"]
@@ -304,11 +293,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(welcome_msg)
 
-# ---- اجرای ربات ----
+# --- اجرای ربات ---
 
 def main():
-    # ساخت اپلیکیشن
-    app = ApplicationBuilder().token(os.environ.get("TELEGRAM_TOKEN")).build()
+    # ساخت اپلیکیشن با نسخه جدید
+    app = Application.builder().token(os.environ.get("TELEGRAM_TOKEN")).build()
     
     # دستورات عمومی
     app.add_handler(CommandHandler("start", start))
